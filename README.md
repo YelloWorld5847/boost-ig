@@ -49,7 +49,23 @@ export MYSMM_API_KEY="votre_cle_api_ici"
 
 ---
 
-## 📖 Utilisation
+## 💬 Personnaliser son propre dictionnaire de commentaires
+
+Vous pouvez définir vos propres phrases personnalisées de deux manières très simples :
+
+### Méthode 1 : Modifier directement `comments.txt` (Automatique)
+Le script lit automatiquement le fichier `comments.txt` à la racine s'il existe (1 commentaire par ligne) :
+```bash
+nano comments.txt
+```
+Ajoutez ou modifiez vos phrases (avec emojis, argot, etc.). Le script piochera dedans automatiquement dès que `--with-comments` est activé !
+
+### Méthode 2 : Spécifier un fichier personnalisé avec `--comments-file`
+```bash
+python3 boost_simulator.py --views 2000 --hours 8 --with-comments --comments-file "mes_commentaires.txt" --link "URL"
+```
+
+---
 
 ### 1. Vérifier son solde
 ```bash

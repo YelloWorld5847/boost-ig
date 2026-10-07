@@ -65,6 +65,22 @@ DEFAULT_FRENCH_COMMENTS = [
     "Qualite au max !", "Bien joue 👍", "Totalement merite 🙌"
 ]
 
+DEFAULT_COMMENTS_FILE = "comments.txt"
+
+
+def load_comments_pool(filepath: Optional[str] = None) -> List[str]:
+    """Charge un dictionnaire de commentaires personnalisés depuis un fichier texte (1 par ligne)."""
+    target_path = filepath or DEFAULT_COMMENTS_FILE
+    if os.path.exists(target_path):
+        try:
+            with open(target_path, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f if line.strip()]
+            if lines:
+                return lines
+        except Exception as e:
+            print(f"[!] Avertissement : impossible de lire {target_path} ({e}), utilisation du pool par défaut.")
+    return list(DEFAULT_FRENCH_COMMENTS)
+
 
 class MySMMClient:
     """Client API v2 pour mysmm.co."""
@@ -924,9 +940,11 @@ def main():
     parser.add_argument("--with-shares", action="store_true",
                         help="Active l'envoi de partages (désactivé par défaut)")
     parser.add_argument("--with-comments", action="store_true",
-                        help="Active l'envoi de commentaires naturels en français (décalés lors de l'accélération virale)")
+                        help="Active l'envoi de commentaires naturels (décalés lors de l'accélération virale)")
     parser.add_argument("--comments-count", type=int, default=None,
                         help="Nombre total de commentaires cibles (par tranches de 10, ex: 10, 20)")
+    parser.add_argument("--comments-file", "-cf", type=str, default=None,
+                        help="Fichier texte contenant votre dictionnaire de commentaires personnalisés (1 par ligne)")
     parser.add_argument("--test-likes", type=str, default=None,
                         help="Envoie immédiatement 10 likes sur le lien spécifié pour tester")
     parser.add_argument("--test-views", type=str, default=None,
@@ -934,7 +952,7 @@ def main():
     parser.add_argument("--test-shares", type=str, default=None,
                         help="Envoie immédiatement 10 partages sur le lien spécifié pour tester")
     parser.add_argument("--test-comments", type=str, default=None,
-                        help="Envoie immédiatement 10 commentaires de test en français sur le lien spécifié")
+                        help="Envoie immédiatement 10 commentaires de test sur le lien spécifié")
     parser.add_argument("--link", type=str, default=DEFAULT_LINK,
                         help=f"Lien du Reel (défaut: {DEFAULT_LINK})")
     parser.add_argument("--key", type=str, default=DEFAULT_API_KEY,
@@ -959,6 +977,7 @@ def main():
     args = parser.parse_args()
 
     api_client = MySMMClient(api_key=args.key)
+    custom_pool = load_comments_pool(args.comments_file)
 
     if args.balance:
         print("Vérification du solde sur mysmm.co...")
@@ -998,7 +1017,7 @@ def main():
 
     if args.test_comments:
         print(f"Envoi de 10 commentaires de test (Service #{args.service_comments}) sur : {args.test_comments}")
-        test_comms = DEFAULT_FRENCH_COMMENTS[:10]
+        test_comms = (custom_pool * 2)[:10] if len(custom_pool) < 10 else custom_pool[:10]
         res = api_client.add_order(args.service_comments, args.test_comments, 10, comments=test_comms, dry_run=False)
         print("Reponse API :", res)
         return
@@ -1048,6 +1067,7 @@ def main():
         service_likes=args.service_likes,
         service_shares=args.service_shares,
         service_comments=args.service_comments,
+        custom_comments_pool=custom_pool,
         link=args.link,
         use_jitter=True
     )
@@ -1073,7 +1093,8 @@ def main():
     if plan['target_shares'] > 0:
         print(f"* Partages & Engagement    : {plan['target_shares']} partages ({plan['share_ratio_pct']}% ratio) ({plan['breakdown']['shares_batches']} x 10) -> #{args.service_shares}")
     if plan.get('target_comments', 0) > 0:
-        print(f"* Commentaires naturels    : {plan['target_comments']} commentaires ({plan['breakdown']['comments_batches']} x 10) -> #{args.service_comments}")
+        src = f"fichier '{args.comments_file}'" if args.comments_file else ("fichier 'comments.txt'" if os.path.exists(DEFAULT_COMMENTS_FILE) else "dictionnaire par défaut")
+        print(f"* Commentaires naturels    : {plan['target_comments']} commentaires ({plan['breakdown']['comments_batches']} x 10) [{src}] -> #{args.service_comments}")
     print(f"* Durée totale             : {plan['duration_hours']}h ({int(plan['total_minutes'])} minutes)")
     print(f"* Nombre total d'actions   : {plan['total_orders']} étapes espacées")
     print(f"* COUT TOTAL REEL          : ${plan['total_cost_usd']:.4f} USD")
