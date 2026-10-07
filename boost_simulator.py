@@ -51,9 +51,19 @@ DEFAULT_LINK = "https://www.instagram.com/reel/DQToIg_k452/"
 SERVICES_FILE = "v2.json"
 
 # Services validés sur l'API mysmm.co pour les REELS Instagram :
-SERVICE_VIEWS_DEFAULT = "1785"   # Instagram Video/Reel Views (rate: $0.00135/1k, min: 100 réels)
-SERVICE_LIKES_DEFAULT = "1"      # Instagram Likes [Cheapest] [100k/hrs] (rate: $0.0902/1k, min: 10) - VALIDÉ OK
-SERVICE_SHARES_DEFAULT = "1581"  # Instagram Shares with Engagement and Reach (rate: $0.1040/1k, min: 10)
+SERVICE_VIEWS_DEFAULT = "1785"      # Instagram Video/Reel Views (rate: $0.00135/1k, min: 100 réels) - VALIDÉ OK
+SERVICE_LIKES_DEFAULT = "1"         # Instagram Likes [Cheapest] [100k/hrs] (rate: $0.0902/1k, min: 10) - VALIDÉ OK
+SERVICE_SHARES_DEFAULT = "1581"     # Instagram Shares with Engagement and Reach (rate: $0.1040/1k, min: 10)
+SERVICE_COMMENTS_DEFAULT = "1637"   # Instagram Custom Comments [Instant Start] (rate: $0.6292/1k, min: 10) - VALIDÉ OK
+
+DEFAULT_FRENCH_COMMENTS = [
+    "Propre ! 🔥", "Masterclass franchement 🙌", "Top niveau 🚀", "Super reel 👏",
+    "Valide a 100% 🔥", "Incroyable !", "Trop fort", "J adore 👍",
+    "Lourd de fou 🔥", "Bravo pour la video 👏", "Le flow est incroyable 🔥",
+    "Du lourd comme d habitude !", "Trop style 🙌", "Carre de fou 👌",
+    "Pepite cette video 🚀", "Valide direct 🔥", "Franchement propre 👏",
+    "Qualite au max !", "Bien joue 👍", "Totalement merite 🙌"
+]
 
 
 class MySMMClient:
@@ -71,7 +81,7 @@ class MySMMClient:
         resp = requests.get(self.base_url, params=params, timeout=15)
         return resp.json()
 
-    def add_order(self, service_id: str, link: str, quantity: int, dry_run: bool = True) -> Dict[str, Any]:
+    def add_order(self, service_id: str, link: str, quantity: int, comments: Optional[List[str]] = None, dry_run: bool = True) -> Dict[str, Any]:
         """Passe une commande ou simule l'appel."""
         if dry_run:
             simulated_id = f"SIM_{int(time.time()*1000) % 100000000}"
@@ -86,6 +96,8 @@ class MySMMClient:
             "link": link,
             "quantity": int(quantity)
         }
+        if comments:
+            data["comments"] = "\r\n".join(comments)
         resp = requests.post(self.base_url, data=data, timeout=20)
         try:
             return resp.json()
@@ -181,16 +193,20 @@ def build_organic_plan(
     like_ratio: float = 0.05,
     share_ratio: float = 0.015,
     include_shares: bool = False,
+    include_comments: bool = False,
+    comments_count: Optional[int] = None,
     catalog: Optional[CatalogManager] = None,
     service_views: str = SERVICE_VIEWS_DEFAULT,
     service_likes: str = SERVICE_LIKES_DEFAULT,
     service_shares: str = SERVICE_SHARES_DEFAULT,
+    service_comments: str = SERVICE_COMMENTS_DEFAULT,
+    custom_comments_pool: Optional[List[str]] = None,
     link: str = DEFAULT_LINK,
     use_jitter: bool = True
 ) -> Dict[str, Any]:
     """
     Construit une simulation 100% organique basée sur les Vues et les Likes
-    (et optionnellement les Partages si demandé avec --with-shares).
+    (optionnellement les Partages avec --with-shares et Commentaires avec --with-comments).
     """
     if catalog is None:
         catalog = CatalogManager()
@@ -204,6 +220,15 @@ def build_organic_plan(
     # 2. Cibles d'engagement associées (min 10 par commande)
     target_likes = max(10, int(round((real_target_views * like_ratio) / 10.0) * 10))
     target_shares = max(10, int(round((real_target_views * share_ratio) / 10.0) * 10)) if include_shares else 0
+
+    if include_comments:
+        if comments_count is not None and comments_count > 0:
+            target_comments = max(10, int(round(comments_count / 10.0) * 10))
+        else:
+            # Règle algorithmique réaliste : 10 coms si < 5000 vues, 20 coms si >= 5000 vues
+            target_comments = max(10, min(40, int(math.ceil(real_target_views / 5000.0) * 10)))
+    else:
+        target_comments = 0
 
     events = []
 
@@ -309,6 +334,44 @@ def build_organic_plan(
                 "link": link
             })
 
+    # =========================================================================
+    # COMMENTAIRES NATURELS (Phase d'accélération virale UNIQUEMENT)
+    # Règle algorithmique : Jamais au tout début quand la vidéo a peu de vues !
+    # =========================================================================
+    if target_comments > 0:
+        comment_batches = target_comments // 10
+        pool = list(custom_comments_pool or DEFAULT_FRENCH_COMMENTS)
+        random.shuffle(pool)
+
+        for c_idx in range(comment_batches):
+            if comment_batches == 1:
+                # 1 seul lot de 10 : injecté à ~38% de la durée (pleine accélération)
+                frac = 0.38
+            else:
+                # Plusieurs lots : étalés entre 35% et 75% de la durée
+                frac = 0.35 + (c_idx / float(comment_batches)) * 0.40
+
+            t_base = sigmoid_time_mapping(frac, total_minutes)
+            t_comment = max(25.0, t_base + 4.5)
+            if use_jitter:
+                t_comment = apply_jitter(t_comment, 0.04)
+
+            # Sélectionner 10 commentaires variés du pool
+            batch_comments = []
+            for k in range(10):
+                batch_comments.append(pool[(c_idx * 10 + k) % len(pool)])
+
+            phase_name = "Engagement conversationnel (Preuve sociale)" if c_idx == 0 else "Relance de viralité & discussion"
+            events.append({
+                "type": "COMMENTS",
+                "time_minutes": min(total_minutes - 4.0, t_comment),
+                "quantity": 10,
+                "service": service_comments,
+                "comments": batch_comments,
+                "phase": phase_name,
+                "link": link
+            })
+
     # Tri chronologique strict
     events.sort(key=lambda x: x["time_minutes"])
 
@@ -316,6 +379,7 @@ def build_organic_plan(
     cum_views = 0
     cum_likes = 0
     cum_shares = 0
+    cum_comments = 0
     total_cost = 0.0
     timeline = []
 
@@ -330,6 +394,8 @@ def build_organic_plan(
             cum_likes += qty
         elif ev["type"] == "SHARES":
             cum_shares += qty
+        elif ev["type"] == "COMMENTS":
+            cum_comments += qty
 
         if i < len(events) - 1:
             pause_min = max(0.5, events[i + 1]["time_minutes"] - ev["time_minutes"])
@@ -347,6 +413,7 @@ def build_organic_plan(
             "quantity": qty,
             "service_id": ev["service"],
             "service_name": srv_name,
+            "comments": ev.get("comments"),
             "phase": ev["phase"],
             "cost": round(cost, 6),
             "pause_min": round(pause_min, 1),
@@ -354,6 +421,7 @@ def build_organic_plan(
             "cum_views": cum_views,
             "cum_likes": cum_likes,
             "cum_shares": cum_shares,
+            "cum_comments": cum_comments,
             "link": ev["link"]
         })
 
@@ -361,6 +429,7 @@ def build_organic_plan(
         "target_views": real_target_views,
         "target_likes": target_likes,
         "target_shares": target_shares,
+        "target_comments": target_comments,
         "like_ratio_pct": round((target_likes / real_target_views) * 100, 1),
         "share_ratio_pct": round((target_shares / real_target_views) * 100, 2),
         "duration_hours": duration_hours,
@@ -373,7 +442,9 @@ def build_organic_plan(
             "likes_batches": target_likes // 10,
             "likes_service": service_likes,
             "shares_batches": target_shares // 10,
-            "shares_service": service_shares
+            "shares_service": service_shares,
+            "comments_batches": target_comments // 10,
+            "comments_service": service_comments
         },
         "timeline": timeline
     }
@@ -448,6 +519,7 @@ def export_plot_png(plan: Dict[str, Any], output_path: str = "simulation_curve.p
     views = [0] + [e["cum_views"] for e in timeline]
     likes = [0] + [e["cum_likes"] for e in timeline]
     shares = [0] + [e["cum_shares"] for e in timeline]
+    comments = [0] + [e.get("cum_comments", 0) for e in timeline]
 
     fig, ax1 = plt.subplots(figsize=(10, 6), dpi=150)
     fig.patch.set_facecolor('#0f172a')
@@ -466,15 +538,24 @@ def export_plot_png(plan: Dict[str, Any], output_path: str = "simulation_curve.p
     ax2 = ax1.twinx()
     color_likes = '#f43f5e'
     color_shares = '#a855f7'
-    ax2.set_ylabel('Interactions cumulées (Likes / Shares)', color='#e2e8f0', fontsize=11, labelpad=10)
+    color_comments = '#10b981'
+    ax2.set_ylabel('Interactions cumulées (Likes / Shares / Coms)', color='#e2e8f0', fontsize=11, labelpad=10)
     line2 = ax2.plot(times, likes, color=color_likes, linewidth=2.0, linestyle='--', label=f'Likes ({plan["like_ratio_pct"]}%)', marker='s', markersize=3)
-    line3 = ax2.plot(times, shares, color=color_shares, linewidth=2.0, linestyle=':', label=f'Partages ({plan["share_ratio_pct"]}%)', marker='^', markersize=3)
+    lines_all = line1 + line2
+
+    if plan.get("target_shares", 0) > 0:
+        line3 = ax2.plot(times, shares, color=color_shares, linewidth=2.0, linestyle=':', label=f'Partages ({plan["share_ratio_pct"]}%)', marker='^', markersize=3)
+        lines_all += line3
+
+    if plan.get("target_comments", 0) > 0:
+        line4 = ax2.plot(times, comments, color=color_comments, linewidth=2.0, linestyle='-.', label=f'Commentaires ({plan["target_comments"]})', marker='d', markersize=3)
+        lines_all += line4
+
     ax2.tick_params(axis='y', colors='#e2e8f0')
 
     title = f"Simulation 100% Organique Instagram : {plan['target_views']:,} Vues ({plan['duration_hours']}h)"
     plt.title(title, color='#f8fafc', fontsize=12.5, weight='bold', pad=15)
 
-    lines_all = line1 + line2 + line3
     labels = [l.get_label() for l in lines_all]
     legend = ax1.legend(lines_all, labels, loc='upper left', facecolor='#0f172a', edgecolor='#334155')
     for text in legend.get_texts():
@@ -486,6 +567,7 @@ def export_plot_png(plan: Dict[str, Any], output_path: str = "simulation_curve.p
         f"Vues : {plan['target_views']:,}\n"
         f"Likes : {plan['target_likes']}\n"
         f"Partages : {plan['target_shares']}\n"
+        f"Commentaires : {plan.get('target_comments', 0)}\n"
         f"Coût total : ${plan['total_cost_usd']:.4f} USD"
     )
     ax1.text(0.70, 0.10, summary_txt, transform=ax1.transAxes, fontsize=9.0,
@@ -509,6 +591,7 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
     data_views = [e["cum_views"] for e in timeline]
     data_likes = [e["cum_likes"] for e in timeline]
     data_shares = [e["cum_shares"] for e in timeline]
+    data_comments = [e.get("cum_comments", 0) for e in timeline]
 
     table_rows = []
     for e in timeline:
@@ -518,9 +601,15 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
         elif e["type"] == "LIKES":
             badge_cls = "badge-likes"
             badge_text = f"+{e['quantity']} Likes"
-        else:
+        elif e["type"] == "SHARES":
             badge_cls = "badge-shares"
             badge_text = f"+{e['quantity']} Partages"
+        elif e["type"] == "COMMENTS":
+            badge_cls = "badge-comments"
+            badge_text = f"+{e['quantity']} Coms"
+        else:
+            badge_cls = "badge-shares"
+            badge_text = f"+{e['quantity']} {e['type']}"
 
         pause_str = f"{e['pause_min']} min ({e['pause_seconds']}s)" if e['pause_seconds'] > 0 else "Objectif atteint"
 
@@ -536,6 +625,7 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
             <td class="font-mono font-semibold text-slate-100">{e['cum_views']}</td>
             <td class="font-mono font-semibold text-rose-400">{e['cum_likes']}</td>
             <td class="font-mono font-semibold text-purple-400">{e['cum_shares']}</td>
+            <td class="font-mono font-semibold text-emerald-400">{e.get('cum_comments', 0)}</td>
         </tr>
         """
         table_rows.append(row)
@@ -552,6 +642,7 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
         .badge-views {{ background-color: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }}
         .badge-likes {{ background-color: rgba(244, 63, 94, 0.2); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.4); padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }}
         .badge-shares {{ background-color: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }}
+        .badge-comments {{ background-color: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }}
         tr:hover {{ background-color: rgba(30, 41, 59, 0.7); }}
     </style>
 </head>
@@ -562,7 +653,7 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
             <h1 class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-400 to-rose-400">
                 Simulation 100% Organique (Instagram Reels)
             </h1>
-            <p class="text-slate-400 mt-1">Triade d'engagement algorithmique : Vues + Likes + Partages avec pacing sigmoïde</p>
+            <p class="text-slate-400 mt-1">Quadriptyque algorithmique : Vues + Likes + Partages + Commentaires avec pacing sigmoïde</p>
         </div>
         <div class="mt-4 md:mt-0 flex items-center space-x-3">
             <span class="bg-indigo-900 text-indigo-300 text-xs px-3 py-1 rounded-full font-mono">mysmm.co v2</span>
@@ -571,7 +662,7 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
     </div>
 
     <!-- KPI Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
         <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
             <div class="text-xs text-slate-400 uppercase tracking-wider">Objectif Vues</div>
             <div class="text-2xl font-black text-sky-400 mt-1">{plan['target_views']:,}</div>
@@ -586,6 +677,11 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
             <div class="text-xs text-slate-400 uppercase tracking-wider">Partages (Shares)</div>
             <div class="text-2xl font-black text-purple-400 mt-1">{plan['target_shares']}</div>
             <div class="text-xs text-slate-500 mt-1">{plan['share_ratio_pct']}% ratio ({plan['breakdown']['shares_batches']} x 10)</div>
+        </div>
+        <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
+            <div class="text-xs text-slate-400 uppercase tracking-wider">Commentaires</div>
+            <div class="text-2xl font-black text-emerald-400 mt-1">{plan.get('target_comments', 0)}</div>
+            <div class="text-xs text-slate-500 mt-1">{plan['breakdown']['comments_batches']} x 10 coms (#1637)</div>
         </div>
         <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
             <div class="text-xs text-slate-400 uppercase tracking-wider">Durée & Ordres</div>
@@ -628,6 +724,7 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
                         <th class="py-3 px-2">Cumul Vues</th>
                         <th class="py-3 px-2">Cumul Likes</th>
                         <th class="py-3 px-2">Cumul Shares</th>
+                        <th class="py-3 px-2">Cumul Coms</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-800">
@@ -643,6 +740,7 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
         const viewsData = {json.dumps(data_views)};
         const likesData = {json.dumps(data_likes)};
         const sharesData = {json.dumps(data_shares)};
+        const commentsData = {json.dumps(data_comments)};
 
         new Chart(ctx, {{
             type: 'line',
@@ -675,6 +773,16 @@ def export_html_report(plan: Dict[str, Any], output_path: str = "simulation_repo
                         borderColor: '#c084fc',
                         borderWidth: 2,
                         borderDash: [2, 3],
+                        fill: false,
+                        tension: 0.3,
+                        yAxisID: 'y1'
+                    }},
+                    {{
+                        label: 'Commentaires cumulés',
+                        data: commentsData,
+                        borderColor: '#34d399',
+                        borderWidth: 2,
+                        borderDash: [3, 3],
                         fill: false,
                         tension: 0.3,
                         yAxisID: 'y1'
@@ -730,6 +838,7 @@ def execute_live_run(plan: Dict[str, Any], api_client: MySMMClient, auto_confirm
     print(f"Vues prévues      : {plan['target_views']:,}")
     print(f"Likes prévus      : {plan['target_likes']}")
     print(f"Partages prévus   : {plan['target_shares']}")
+    print(f"Commentaires      : {plan.get('target_comments', 0)}")
     print(f"Coût total prévu  : ${plan['total_cost_usd']:.4f} USD")
     print(f"Durée totale      : {plan['duration_hours']}h")
     print("=" * 65)
@@ -762,6 +871,7 @@ def execute_live_run(plan: Dict[str, Any], api_client: MySMMClient, auto_confirm
                 service_id=step["service_id"],
                 link=step["link"],
                 quantity=step["quantity"],
+                comments=step.get("comments"),
                 dry_run=False
             )
             if "order" in res:
@@ -813,12 +923,18 @@ def main():
                         help="Ratio de partages par rapport aux vues (défaut: 0.015 = 1.5%%)")
     parser.add_argument("--with-shares", action="store_true",
                         help="Active l'envoi de partages (désactivé par défaut)")
+    parser.add_argument("--with-comments", action="store_true",
+                        help="Active l'envoi de commentaires naturels en français (décalés lors de l'accélération virale)")
+    parser.add_argument("--comments-count", type=int, default=None,
+                        help="Nombre total de commentaires cibles (par tranches de 10, ex: 10, 20)")
     parser.add_argument("--test-likes", type=str, default=None,
                         help="Envoie immédiatement 10 likes sur le lien spécifié pour tester")
     parser.add_argument("--test-views", type=str, default=None,
                         help="Envoie immédiatement 100 vues sur le lien spécifié pour tester")
     parser.add_argument("--test-shares", type=str, default=None,
                         help="Envoie immédiatement 10 partages sur le lien spécifié pour tester")
+    parser.add_argument("--test-comments", type=str, default=None,
+                        help="Envoie immédiatement 10 commentaires de test en français sur le lien spécifié")
     parser.add_argument("--link", type=str, default=DEFAULT_LINK,
                         help=f"Lien du Reel (défaut: {DEFAULT_LINK})")
     parser.add_argument("--key", type=str, default=DEFAULT_API_KEY,
@@ -837,6 +953,8 @@ def main():
                         help=f"Service ID pour likes (défaut: {SERVICE_LIKES_DEFAULT})")
     parser.add_argument("--service-shares", type=str, default=SERVICE_SHARES_DEFAULT,
                         help=f"Service ID pour shares (défaut: {SERVICE_SHARES_DEFAULT})")
+    parser.add_argument("--service-comments", type=str, default=SERVICE_COMMENTS_DEFAULT,
+                        help=f"Service ID pour commentaires (défaut: {SERVICE_COMMENTS_DEFAULT})")
 
     args = parser.parse_args()
 
@@ -878,6 +996,13 @@ def main():
         print("Reponse API :", res)
         return
 
+    if args.test_comments:
+        print(f"Envoi de 10 commentaires de test (Service #{args.service_comments}) sur : {args.test_comments}")
+        test_comms = DEFAULT_FRENCH_COMMENTS[:10]
+        res = api_client.add_order(args.service_comments, args.test_comments, 10, comments=test_comms, dry_run=False)
+        print("Reponse API :", res)
+        return
+
     target_views = args.views
     if target_views is None:
         if sys.stdin.isatty():
@@ -916,10 +1041,13 @@ def main():
         like_ratio=args.likes_ratio,
         share_ratio=args.shares_ratio,
         include_shares=args.with_shares,
+        include_comments=args.with_comments,
+        comments_count=args.comments_count,
         catalog=catalog,
         service_views=args.service_views,
         service_likes=args.service_likes,
         service_shares=args.service_shares,
+        service_comments=args.service_comments,
         link=args.link,
         use_jitter=True
     )
@@ -944,6 +1072,8 @@ def main():
     print(f"* Likes naturels           : {plan['target_likes']} likes ({plan['like_ratio_pct']}% ratio) ({plan['breakdown']['likes_batches']} x 10) -> #{args.service_likes}")
     if plan['target_shares'] > 0:
         print(f"* Partages & Engagement    : {plan['target_shares']} partages ({plan['share_ratio_pct']}% ratio) ({plan['breakdown']['shares_batches']} x 10) -> #{args.service_shares}")
+    if plan.get('target_comments', 0) > 0:
+        print(f"* Commentaires naturels    : {plan['target_comments']} commentaires ({plan['breakdown']['comments_batches']} x 10) -> #{args.service_comments}")
     print(f"* Durée totale             : {plan['duration_hours']}h ({int(plan['total_minutes'])} minutes)")
     print(f"* Nombre total d'actions   : {plan['total_orders']} étapes espacées")
     print(f"* COUT TOTAL REEL          : ${plan['total_cost_usd']:.4f} USD")

@@ -8,10 +8,12 @@ Ce script reproduit fidèlement la dynamique virale de l'algorithme Instagram gr
 
 ## ⚡ Caractéristiques
 
-- **Triade algorithmique** :
-  - **Vues Reels** (Service `#1785`, cohortes de 100 vues)
-  - **Likes naturels** (Service `#1`, tranches de 10 likes, instantanés)
-  - **Partages & Reach** (Service `#1581`, tranches de 10 partages, activable avec `--with-shares`)
+- **Quadriptyque algorithmique complet** :
+  - **Vues Reels** (Service `#1785`, cohortes de 100 vues, $0.00135/1k)
+  - **Likes naturels** (Service `#1`, tranches de 10 likes, instantanés, $0.0902/1k)
+  - **Partages & Reach** (Service `#1581`, tranches de 10 partages, activable avec `--with-shares`, $0.1040/1k)
+  - **Commentaires naturels en français** (Service `#1637`, tranches de 10 coms, activable avec `--with-comments`, $0.6292/1k)
+- **Logique algorithmique crédible** : Les commentaires ne sont **JAMAIS** envoyés à T+0h, mais déclenchés au cœur de la phase d'accélération virale une fois que le Reel a déjà accumulé du volume de vues et de likes !
 - **Modèle de courbe sigmoïde (S-Curve)** : Amorçage doux $\to$ Accélération virale $\to$ Plateau de rétention.
 - **Jitter anti-détection** : Micro-variations de pauses aléatoires pour supprimer tout comportement robotique prévisible.
 - **Mode Simulation (sans frais)** : Génère un aperçu console ASCII, un graphique PNG et un dashboard interactif HTML avec calcul précis des coûts au millième de centime.
@@ -19,24 +21,20 @@ Ce script reproduit fidèlement la dynamique virale de l'algorithme Instagram gr
 
 ---
 
-## 🐧 Installation rapide sur Ubuntu Server
+## 🐧 Installation & Mise à jour sur Ubuntu Server
 
-### 1. Mettre à jour et installer les dépendances système
+### 1. Cloner ou mettre à jour le dépôt
 ```bash
-sudo apt update && sudo apt install -y python3 python3-pip python3-venv git tmux
-```
-
-### 2. Cloner le dépôt
-```bash
+# Si premier clone :
 git clone https://github.com/YelloWorld5847/boost-ig.git
 cd boost-ig
-```
-
-### 3. Créer un environnement virtuel Python et installer les dépendances
-```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+
+# Si le projet est déjà sur votre serveur, mettez-le simplement à jour :
+cd boost-ig
+git pull
 ```
 
 ---
@@ -61,19 +59,21 @@ python3 boost_simulator.py --balance
 ### 2. Mode Simulation (0 risque, aucun débit)
 Génère la courbe, les visualisations et le coût sans envoyer d'ordre :
 ```bash
-# 2 000 vues sur 8 heures (par défaut)
+# 2 000 vues sur 8 heures (Vues + Likes)
 python3 boost_simulator.py --views 2000 --hours 8 --link "https://www.instagram.com/reel/XXXXX/"
 
-# Avec partages activés
-python3 boost_simulator.py --views 2000 --hours 8 --with-shares --link "https://www.instagram.com/reel/XXXXX/"
+# Avec commentaires en français activés (déclenchés après la montée des vues)
+python3 boost_simulator.py --views 2000 --hours 8 --with-comments --link "https://www.instagram.com/reel/XXXXX/"
+
+# Boost complet (Vues + Likes + Partages + Commentaires)
+python3 boost_simulator.py --views 20000 --hours 36 --with-comments --with-shares --link "https://www.instagram.com/reel/XXXXX/"
 ```
 
 ### 3. Mode Live (Exécution en direct)
 Exécute les ordres réels avec les pauses calculées :
 ```bash
-python3 boost_simulator.py --views 2000 --hours 8 --link "https://www.instagram.com/reel/XXXXX/" --live
+python3 boost_simulator.py --views 2000 --hours 8 --with-comments --link "https://www.instagram.com/reel/XXXXX/" --live -y
 ```
-*(Ajoutez `--yes` ou `-y` si vous souhaitez ignorer la demande de confirmation manuelle).*
 
 ---
 
@@ -81,14 +81,14 @@ python3 boost_simulator.py --views 2000 --hours 8 --link "https://www.instagram.
 
 Pour éviter que le script ne s'arrête lorsque vous fermez votre session SSH :
 
-### Option 1 : Avec `tmux` (Recommandé)
+### Avec `tmux` (Recommandé)
 ```bash
 # 1. Ouvrir une session tmux
 tmux new -s boost
 
-# 2. Activer le venv et lancer le script
+# 2. Activer le venv et lancer le boost réel
 source venv/bin/activate
-python3 boost_simulator.py --views 2000 --hours 8 --link "https://www.instagram.com/reel/XXXXX/" --live -y
+python3 boost_simulator.py --views 20000 --hours 36.0 --with-comments --link "https://www.instagram.com/reel/XXXXX/" --live -y
 
 # 3. Détacher la session en toute sécurité :
 # Appuyez sur Ctrl + B, puis relâchez et appuyez sur D
@@ -97,17 +97,9 @@ python3 boost_simulator.py --views 2000 --hours 8 --link "https://www.instagram.
 tmux attach -t boost
 ```
 
-### Option 2 : Avec `nohup`
-```bash
-nohup python3 boost_simulator.py --views 2000 --hours 8 --link "https://www.instagram.com/reel/XXXXX/" --live -y > boost.log 2>&1 &
-
-# Pour suivre les logs en direct :
-tail -f boost.log
-```
-
 ---
 
-## 🛠️ Commandes de diagnostic rapide
+## 🛠️ Commandes de test rapide
 
 ```bash
 # Tester 100 vues immédiates sur un Reel
@@ -115,6 +107,9 @@ python3 boost_simulator.py --test-views "https://www.instagram.com/reel/XXXXX/"
 
 # Tester 10 likes immédiats sur un Reel
 python3 boost_simulator.py --test-likes "https://www.instagram.com/reel/XXXXX/"
+
+# Tester 10 commentaires français immédiats sur un Reel
+python3 boost_simulator.py --test-comments "https://www.instagram.com/reel/XXXXX/"
 
 # Tester 10 partages sur un Reel
 python3 boost_simulator.py --test-shares "https://www.instagram.com/reel/XXXXX/"
